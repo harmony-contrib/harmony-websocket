@@ -15,7 +15,7 @@ use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 pub struct WebSocket {
     url: String,
     on_error: Option<Arc<ThreadsafeFunction<(), ()>>>,
-    on_message: Option<Arc<ThreadsafeFunction<String, ()>>>,
+    on_message: Option<Arc<ThreadsafeFunction<Either<String, Buffer>, ()>>>,
     on_open: Option<Arc<ThreadsafeFunction<(), ()>>>,
     on_close: Option<Arc<ThreadsafeFunction<(), ()>>>,
     writer: RwLock<Option<mpsc::Sender<Message>>>,
@@ -75,17 +75,18 @@ impl WebSocket {
                             hilog_info!(format!("ws-rs text data: {}", text));
                             if let Some(on_message) = &self.on_message {
                                 on_message.call(
-                                    Ok(text.to_string()),
+                                    Ok(Either::A(text.to_string())),
                                     ThreadsafeFunctionCallMode::NonBlocking,
                                 );
                             }
                         }
                         Message::Binary(data) => {
-                            let data_str = base64::encode(&data);
-                            hilog_info!(format!("ws-rs binary data: {}", data_str));
                             if let Some(on_message) = &self.on_message {
-                                on_message
-                                    .call(Ok(data_str), ThreadsafeFunctionCallMode::NonBlocking);
+                                let buf = data.iter().as_slice();
+                                on_message.call(
+                                    Ok(Either::B(Buffer::from(buf))),
+                                    ThreadsafeFunctionCallMode::NonBlocking,
+                                );
                             }
                         }
                         Message::Close(frame) => {
@@ -128,11 +129,18 @@ impl WebSocket {
     }
 
     #[napi]
-    pub async fn send(&self, data: String) -> Result<()> {
+    pub async fn send(&self, data: Either<String, Buffer>) -> Result<()> {
         let writer = self.writer.read().await;
         if let Some(writer) = writer.as_ref() {
+            let message = match data {
+                Either::A(text) => Message::Text(text.into()),
+                Either::B(buf) => {
+                    let bytes = Vec::<u8>::from(buf);
+                    Message::Binary(bytes.into())
+                }
+            };
             writer
-                .send(Message::Text(data.into()))
+                .send(message)
                 .await
                 .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
         }
@@ -174,7 +182,10 @@ impl WebSocket {
     }
 
     #[napi]
-    pub unsafe fn on_message(&mut self, callback: Function<String, ()>) -> Result<()> {
+    pub unsafe fn on_message(
+        &mut self,
+        callback: Function<Either<String, Buffer>, ()>,
+    ) -> Result<()> {
         let callback = callback
             .build_threadsafe_function()
             .callee_handled::<true>()
