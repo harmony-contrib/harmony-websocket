@@ -14,11 +14,11 @@ ohpm install @ohos-rs/websocket
 export declare class WebSocket {
   constructor(url: string)
   connect(): Promise<void>
-  send(data: string): Promise<void>
+  send(data: string | ArrayBuffer): Promise<void>
   close(): Promise<void>
   ping(): Promise<void>
   onError(callback: () => void): void
-  onMessage(callback: (arg: string) => void): void
+  onMessage(callback: (arg: string | ArrayBuffer) => void): void
   onOpen(callback: () => void): void
   onClose(callback: () => void): void
 }
