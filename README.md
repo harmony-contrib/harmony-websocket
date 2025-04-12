@@ -16,11 +16,13 @@ export declare class WebSocket {
   connect(): Promise<void>
   send(data: string | ArrayBuffer): Promise<void>
   close(): Promise<void>
-  ping(): Promise<void>
+  ping(pingMessage?: ArrayBuffer | undefined | null): Promise<void>
   onError(callback: () => void): void
   onMessage(callback: (arg: string | ArrayBuffer) => void): void
   onOpen(callback: () => void): void
   onClose(callback: () => void): void
+  onPing(callback: (arg: ArrayBuffer) => ArrayBuffer | null): void
+  onPong(callback: (arg: ArrayBuffer) => void): void
 }
 ```
 

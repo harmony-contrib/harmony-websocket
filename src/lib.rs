@@ -7,7 +7,7 @@ use napi_ohos::{
     threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode},
     Result,
 };
-use ohos_hilog_binding::hilog_info;
+use ohos_hilog_binding::hilog_error;
 use tokio::sync::{mpsc, RwLock};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
@@ -18,6 +18,8 @@ pub struct WebSocket {
     on_message: Option<Arc<ThreadsafeFunction<Either<String, Buffer>, ()>>>,
     on_open: Option<Arc<ThreadsafeFunction<(), ()>>>,
     on_close: Option<Arc<ThreadsafeFunction<(), ()>>>,
+    on_ping: Option<Arc<ThreadsafeFunction<Buffer, Option<Buffer>>>>,
+    on_pong: Option<Arc<ThreadsafeFunction<Buffer, ()>>>,
     writer: RwLock<Option<mpsc::Sender<Message>>>,
 }
 
@@ -31,25 +33,20 @@ impl WebSocket {
             on_message: None,
             on_open: None,
             on_close: None,
+            on_ping: None,
+            on_pong: None,
             writer: RwLock::new(None),
         }
     }
 
     #[napi]
     pub async fn connect(&self) -> Result<()> {
-        let url = self.url.clone();
-
-        let ws_stream = match connect_async(&url).await {
-            Ok((ws_stream, _)) => {
-                hilog_info!(format!("ws-rs connect success"));
-                ws_stream
-            }
+        let ws_stream = match connect_async(&self.url).await {
+            Ok((ws_stream, _)) => ws_stream,
             Err(e) => {
-                let err_msg = format!("连接错误: {}", e);
-                hilog_info!(format!("ws-rs connect error: {}", err_msg));
                 return Err(Error::new(
                     Status::GenericFailure,
-                    format!("连接错误: {}", e),
+                    format!("ws-rs connection failed: {}", e),
                 ));
             }
         };
@@ -66,13 +63,11 @@ impl WebSocket {
             }
         };
 
-        // 处理从WebSocket接收的消息
         let read_from_ws = read.for_each(|message_result| {
             async move {
                 match message_result {
                     Ok(message) => match message {
                         Message::Text(text) => {
-                            hilog_info!(format!("ws-rs text data: {}", text));
                             if let Some(on_message) = &self.on_message {
                                 on_message.call(
                                     Ok(Either::A(text.to_string())),
@@ -91,27 +86,51 @@ impl WebSocket {
                         }
                         Message::Close(frame) => {
                             if let Some(frame) = frame {
-                                hilog_info!(format!(
-                                    "ws-rs: {} {}",
-                                    frame.code,
-                                    frame.reason.to_string()
-                                ));
                                 if let Some(on_close) = &self.on_close {
                                     on_close.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
                                 }
                             } else {
-                                hilog_info!("ws-rs: 正常关闭连接");
                                 if let Some(on_close) = &self.on_close {
                                     on_close.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
                                 }
                             }
                         }
+                        Message::Ping(ping_message) => {
+                            if let Some(on_ping) = &self.on_ping {
+                                let buf = ping_message.iter().as_slice();
+                                let pong_message =
+                                    match on_ping.call_async(Ok(Buffer::from(buf))).await {
+                                        Ok(return_value) => {
+                                            if let Some(pong_message) = return_value {
+                                                let pong_buf = Vec::<u8>::from(pong_message);
+                                                Message::Pong(pong_buf.into())
+                                            } else {
+                                                Message::Pong("pong".into())
+                                            }
+                                        }
+                                        Err(e) => {
+                                            hilog_error!(format!("ws-rs: onPing error: {}", e));
+                                            Message::Pong("pong".into())
+                                        }
+                                    };
+                                let writer = self.writer.read().await;
+                                if let Some(writer) = writer.as_ref() {
+                                    writer.send(pong_message).await.unwrap();
+                                }
+                            }
+                        }
+                        Message::Pong(pong_message) => {
+                            if let Some(on_pong) = &self.on_pong {
+                                let buf = pong_message.iter().as_slice();
+                                on_pong.call(
+                                    Ok(Buffer::from(buf)),
+                                    ThreadsafeFunctionCallMode::NonBlocking,
+                                );
+                            }
+                        }
                         _ => {} // 忽略其他类型的消息
                     },
                     Err(e) => {
-                        let err_msg = format!("ws-rs:接收消息错误: {}", e);
-                        hilog_info!(err_msg);
-
                         if let Some(on_error) = &self.on_error {
                             on_error.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
                         }
@@ -160,11 +179,27 @@ impl WebSocket {
     }
 
     #[napi]
-    pub async fn ping(&self) -> Result<()> {
+    pub async fn ping(&self, ping_message: Option<Buffer>) -> Result<()> {
+        let ping_message = match ping_message {
+            Some(buf) => {
+                let bytes = Vec::<u8>::from(buf);
+                bytes
+            }
+            None => "ping".into(),
+        };
+
+        if ping_message.len() > 128 {
+            return Err(Error::new(
+                Status::GenericFailure,
+                "ping message length exceeds 128 bytes".to_string(),
+            ));
+        }
+        let ping_message = Message::Ping(ping_message.into());
+
         let writer = self.writer.read().await;
         if let Some(writer) = writer.as_ref() {
             writer
-                .send(Message::Ping("ping".into()))
+                .send(ping_message)
                 .await
                 .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
         }
@@ -211,6 +246,26 @@ impl WebSocket {
             .callee_handled::<true>()
             .build()?;
         self.on_close = Some(Arc::new(callback));
+        Ok(())
+    }
+
+    #[napi]
+    pub unsafe fn on_ping(&mut self, callback: Function<Buffer, Option<Buffer>>) -> Result<()> {
+        let callback = callback
+            .build_threadsafe_function()
+            .callee_handled::<true>()
+            .build()?;
+        self.on_ping = Some(Arc::new(callback));
+        Ok(())
+    }
+
+    #[napi]
+    pub unsafe fn on_pong(&mut self, callback: Function<Buffer, ()>) -> Result<()> {
+        let callback = callback
+            .build_threadsafe_function()
+            .callee_handled::<true>()
+            .build()?;
+        self.on_pong = Some(Arc::new(callback));
         Ok(())
     }
 }

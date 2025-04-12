@@ -7,3 +7,6 @@ package/libs
 *.har
 
 Cargo.lock
+
+
+node_modules/
