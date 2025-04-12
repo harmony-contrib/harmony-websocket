@@ -138,3 +138,14 @@ const app = uWS
     }
   });
 ```
+
+
+## How to build
+
+We provide two methods to build:
+
+1. Build with native-tls vendor mode.
+
+2. Build with openssl prebuild mode.
+
+**Note: For windows, please make sure that `OHOS_NDK_HOME` do not has space charactor**
