@@ -138,3 +138,23 @@ const app = uWS
     }
   });
 ```
+
+
+## How to build
+
+We provide two methods to build:
+
+1. Build with native-tls vendor mode.
+
+```bash
+bash ./scripts/build.sh vendor
+```
+
+2. Build with openssl prebuild mode.
+
+```bash
+bash ./scripts/build.sh
+```
+
+3. For windows, please make sure that `OHOS_NDK_HOME` do not has space character
+4. For prebuild mode, `ohrs` seems like has some issues that can not copy `libssl.so` and `libcrypto.so` to dist folder, so please copy them.
