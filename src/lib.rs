@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{fs::File, io::Read, sync::Arc};
 
 use futures_util::{SinkExt, StreamExt};
 use napi_derive_ohos::napi;
@@ -9,11 +9,18 @@ use napi_ohos::{
 };
 use ohos_hilog_binding::hilog_error;
 use tokio::sync::{mpsc, RwLock};
-use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
+use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::protocol::Message, Connector};
+
+#[napi(object)]
+pub struct WebSocketConfig {
+    /// Custom cert file path
+    pub cert_path: Option<String>,
+}
 
 #[napi]
 pub struct WebSocket {
     url: String,
+    config: Option<WebSocketConfig>,
     on_error: Option<Arc<ThreadsafeFunction<(), ()>>>,
     on_message: Option<Arc<ThreadsafeFunction<Either<String, Buffer>, ()>>>,
     on_open: Option<Arc<ThreadsafeFunction<(), ()>>>,
@@ -26,7 +33,7 @@ pub struct WebSocket {
 #[napi]
 impl WebSocket {
     #[napi(constructor)]
-    pub fn new(url: String) -> Self {
+    pub fn new(url: String, config: Option<WebSocketConfig>) -> Self {
         WebSocket {
             url,
             on_error: None,
@@ -35,13 +42,54 @@ impl WebSocket {
             on_close: None,
             on_ping: None,
             on_pong: None,
+            config: config,
             writer: RwLock::new(None),
         }
     }
 
     #[napi]
     pub async fn connect(&self) -> Result<()> {
-        let ws_stream = match connect_async(&self.url).await {
+        let mut connector: Option<Connector> = None;
+
+        if let Some(config) = &self.config {
+            if let Some(cert_path) = &config.cert_path {
+                let mut cert_data = Vec::new();
+                File::open(cert_path)
+                    .map_err(|e| {
+                        Error::new(
+                            Status::GenericFailure,
+                            format!("Try to open cert file path failed: {}", e.to_string()),
+                        )
+                    })?
+                    .read_to_end(&mut cert_data)
+                    .map_err(|e| {
+                        Error::new(
+                            Status::GenericFailure,
+                            format!("Try to read cert file failed: {}", e.to_string()),
+                        )
+                    })?;
+                let cert = native_tls::Certificate::from_pem(&cert_data).map_err(|e| {
+                    Error::new(
+                        Status::GenericFailure,
+                        format!("Try to parse cert file failed: {}", e.to_string()),
+                    )
+                })?;
+
+                let mut builder = native_tls::TlsConnector::builder();
+                builder.add_root_certificate(cert);
+
+                let tls_connector = builder.build().map_err(|e| {
+                    Error::new(
+                        Status::GenericFailure,
+                        format!("Try to build tls connector failed: {}", e.to_string()),
+                    )
+                })?;
+
+                connector = Some(Connector::NativeTls(tls_connector));
+            }
+        }
+        let ws_stream = match connect_async_tls_with_config(&self.url, None, false, connector).await
+        {
             Ok((ws_stream, _)) => ws_stream,
             Err(e) => {
                 return Err(Error::new(
