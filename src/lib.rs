@@ -90,7 +90,12 @@ impl WebSocket {
         }
         let ws_stream = match connect_async_tls_with_config(&self.url, None, false, connector).await
         {
-            Ok((ws_stream, _)) => ws_stream,
+            Ok((ws_stream, _)) => {
+                if let Some(on_open) = &self.on_open {
+                    on_open.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
+                }
+                ws_stream
+            }
             Err(e) => {
                 return Err(Error::new(
                     Status::GenericFailure,
