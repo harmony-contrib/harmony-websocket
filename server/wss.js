@@ -5,8 +5,8 @@ let wsInstance;
 
 const app = uWS
   .SSLApp({
-    key_file_name: "misc/key.pem",
-    cert_file_name: "misc/cert.pem",
+    key_file_name: "../misc/server.key",
+    cert_file_name: "../misc/server.crt",
     passphrase: "1234",
   })
   .ws("/*", {

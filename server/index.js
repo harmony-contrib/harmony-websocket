@@ -29,7 +29,7 @@ const app = uWS
   .get("/ping", (res, req) => {
     if (wsInstance) {
       let a = wsInstance.ping("ping");
-      console.log(a)
+      console.log(a);
     }
     res.end("pong");
   })
