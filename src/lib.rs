@@ -22,6 +22,10 @@ pub struct WebSocketConfig {
 
     /// Custom headers
     pub headers: Option<HashMap<String, String>>,
+
+    /// Enable websocket extensions.
+    /// If enabled, the client will add `Sec-WebSocket-Extensions` header with `permessage-deflate; client_max_window_bits`
+    pub enable_extension: Option<bool>,
 }
 
 #[napi]
@@ -105,8 +109,19 @@ impl WebSocket {
         let header = request.headers_mut();
 
         let custom_header = self.config.as_ref().and_then(|d| d.headers.clone());
+        let enable_extension = self
+            .config
+            .as_ref()
+            .and_then(|d| d.enable_extension.clone())
+            .unwrap_or(false);
 
-        if let Some(h) = custom_header {
+        if let Some(mut h) = custom_header {
+            if enable_extension {
+                h.insert(
+                    "Sec-WebSocket-Extensions".to_string(),
+                    "permessage-deflate; client_max_window_bits".to_string(),
+                );
+            }
             for (key, value) in h {
                 // First parse the header name from the string
                 let header_name =
