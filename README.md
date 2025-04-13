@@ -13,22 +13,26 @@ ohpm install @ohos-rs/websocket
 ```ts
 export interface WebSocketConfig {
   /** Custom cert file path */
-  certPath?: string;
+  certPath?: string
+  /** Custom headers */
+  headers?: Record<string, string>
 }
 
 export declare class WebSocket {
-  constructor(url: string, config?: WebSocketConfig | undefined | null);
-  connect(): Promise<void>;
-  send(data: string | ArrayBuffer): Promise<void>;
-  close(): Promise<void>;
-  ping(pingMessage?: ArrayBuffer | undefined | null): Promise<void>;
-  onError(callback: () => void): void;
-  onMessage(callback: (arg: string | ArrayBuffer) => void): void;
-  onOpen(callback: () => void): void;
-  onClose(callback: () => void): void;
-  onPing(callback: (arg: ArrayBuffer) => ArrayBuffer | null): void;
-  onPong(callback: (arg: ArrayBuffer) => void): void;
+  constructor(url: string, config?: WebSocketConfig | undefined | null)
+  connect(): Promise<void>
+  send(data: string | ArrayBuffer): Promise<void>
+  close(): Promise<void>
+  ping(pingMessage?: ArrayBuffer | undefined | null): Promise<void>
+  onError(callback: () => void): void
+  onMessage(callback: (arg: string | ArrayBuffer) => void): void
+  onOpen(callback: () => void): void
+  onClose(callback: () => void): void
+  onPing(callback: (arg: ArrayBuffer) => ArrayBuffer | null): void
+  onPong(callback: (arg: ArrayBuffer) => void): void
 }
+
+
 ```
 
 ## Usage
