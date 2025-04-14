@@ -33,6 +33,14 @@ const app = uWS
     }
     res.end("pong");
   })
+  .get("/bin",(res, req) => {
+    if (wsInstance) {
+      let msg = Buffer.from("hello");
+      let a = wsInstance.send(msg, true)
+      console.log(a);
+    }
+    res.end("pong");
+  })
   .any("/*", (res, req) => {
     res.end("Nothing to see here!");
   })
