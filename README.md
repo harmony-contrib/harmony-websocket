@@ -16,6 +16,11 @@ export interface WebSocketConfig {
   certPath?: string
   /** Custom headers */
   headers?: Record<string, string>
+  /**
+    * Enable websocket extensions.
+    * If enabled, the client will add `Sec-WebSocket-Extensions` header with `permessage-deflate; client_max_window_bits`
+    */
+  enableExtension?: boolean
 }
 
 export declare class WebSocket {
@@ -30,9 +35,8 @@ export declare class WebSocket {
   onClose(callback: () => void): void
   onPing(callback: (arg: ArrayBuffer) => ArrayBuffer | null): void
   onPong(callback: (arg: ArrayBuffer) => void): void
+  onHeaderReceived(callback: (arg: Record<string, string>) => void): void
 }
-
-
 ```
 
 ## Usage

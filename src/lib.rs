@@ -11,7 +11,7 @@ use ohos_hilog_binding::hilog_error;
 use tokio::sync::{mpsc, RwLock};
 use tokio_tungstenite::{
     connect_async_tls_with_config,
-    tungstenite::{client::IntoClientRequest, protocol::Message},
+    tungstenite::{client::IntoClientRequest, http::response, protocol::Message},
     Connector,
 };
 
@@ -39,6 +39,9 @@ pub struct WebSocket {
     on_close: Option<Arc<ThreadsafeFunction<(), (), (), false>>>,
     on_ping: Option<Arc<ThreadsafeFunction<Buffer, Option<Buffer>, Buffer, false>>>,
     on_pong: Option<Arc<ThreadsafeFunction<Buffer, (), Buffer, false>>>,
+    on_header_received: Option<
+        Arc<ThreadsafeFunction<HashMap<String, String>, (), HashMap<String, String>, false>>,
+    >,
     writer: RwLock<Option<mpsc::Sender<Message>>>,
 }
 
@@ -55,6 +58,7 @@ impl WebSocket {
             on_ping: None,
             on_pong: None,
             config: config,
+            on_header_received: None,
             writer: RwLock::new(None),
         }
     }
@@ -153,20 +157,33 @@ impl WebSocket {
             }
         }
 
-        let ws_stream = match connect_async_tls_with_config(request, None, false, connector).await {
-            Ok((ws_stream, _)) => {
-                if let Some(on_open) = &self.on_open {
-                    on_open.call((), ThreadsafeFunctionCallMode::NonBlocking);
+        let (ws_stream, response) =
+            match connect_async_tls_with_config(request, None, false, connector).await {
+                Ok((ws_stream, response)) => {
+                    if let Some(on_open) = &self.on_open {
+                        on_open.call((), ThreadsafeFunctionCallMode::NonBlocking);
+                    }
+                    (ws_stream, response)
                 }
-                ws_stream
+                Err(e) => {
+                    return Err(Error::new(
+                        Status::GenericFailure,
+                        format!("ws-rs connection failed: {}", e),
+                    ));
+                }
+            };
+
+        let headers = response.headers();
+        if let Some(on_header_received) = &self.on_header_received {
+            let mut headers_map = HashMap::new();
+            for (key, value) in headers.iter() {
+                headers_map.insert(
+                    key.to_string(),
+                    value.to_str().unwrap_or_default().to_string(),
+                );
             }
-            Err(e) => {
-                return Err(Error::new(
-                    Status::GenericFailure,
-                    format!("ws-rs connection failed: {}", e),
-                ));
-            }
-        };
+            on_header_received.call(headers_map, ThreadsafeFunctionCallMode::NonBlocking);
+        }
 
         let (mut write, read) = ws_stream.split();
 
@@ -383,6 +400,19 @@ impl WebSocket {
             .callee_handled::<false>()
             .build()?;
         self.on_pong = Some(Arc::new(callback));
+        Ok(())
+    }
+
+    #[napi]
+    pub unsafe fn on_header_received(
+        &mut self,
+        callback: Function<HashMap<String, String>, ()>,
+    ) -> Result<()> {
+        let callback = callback
+            .build_threadsafe_function()
+            .callee_handled::<false>()
+            .build()?;
+        self.on_header_received = Some(Arc::new(callback));
         Ok(())
     }
 }
