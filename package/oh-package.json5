@@ -7,7 +7,7 @@
   version: "0.0.1",
   types: "libs/index.d.ts",
   dependencies: {},
-  keywords: ["websocket", "harmony", "openharmony"],
+  keywords: ["websocket", "harmony", "openharmony", "tokio-tungstenite", "tokio"],
   repository: {
     type: "git",
     url: "git+https://github.com/harmony-contrib/harmony-websocket.git"

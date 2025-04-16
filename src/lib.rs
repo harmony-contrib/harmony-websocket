@@ -1,19 +1,22 @@
 use std::{collections::HashMap, fs::File, io::Read, sync::Arc};
 
+use error::WebSocketError;
 use futures_util::{SinkExt, StreamExt};
 use napi_derive_ohos::napi;
 use napi_ohos::{
     bindgen_prelude::*,
     threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode},
-    Result,
+    Error, Result,
 };
 use ohos_hilog_binding::hilog_error;
 use tokio::sync::{mpsc, RwLock};
 use tokio_tungstenite::{
     connect_async_tls_with_config,
-    tungstenite::{client::IntoClientRequest, http::response, protocol::Message},
+    tungstenite::{client::IntoClientRequest, protocol::Message},
     Connector,
 };
+
+mod error;
 
 #[napi(object)]
 pub struct WebSocketConfig {
@@ -32,11 +35,12 @@ pub struct WebSocketConfig {
 pub struct WebSocket {
     url: String,
     config: Option<WebSocketConfig>,
-    on_error: Option<Arc<ThreadsafeFunction<(), (), (), false>>>,
+    on_error:
+        Option<Arc<ThreadsafeFunction<Error<WebSocketError>, (), Error<WebSocketError>, false>>>,
     on_message:
         Option<Arc<ThreadsafeFunction<Either<String, Buffer>, (), Either<String, Buffer>, false>>>,
     on_open: Option<Arc<ThreadsafeFunction<(), (), (), false>>>,
-    on_close: Option<Arc<ThreadsafeFunction<(), (), (), false>>>,
+    on_close: Option<Arc<ThreadsafeFunction<bool, (), bool, false>>>,
     on_ping: Option<Arc<ThreadsafeFunction<Buffer, Option<Buffer>, Buffer, false>>>,
     on_pong: Option<Arc<ThreadsafeFunction<Buffer, (), Buffer, false>>>,
     on_header_received: Option<
@@ -193,7 +197,14 @@ impl WebSocket {
 
         let write_from_js = async move {
             while let Some(message) = rx.recv().await {
-                write.send(message).await.unwrap();
+                if let Err(e) = write.send(message).await {
+                    if let Some(on_error) = &self.on_error {
+                        on_error.call(
+                            Error::new(WebSocketError::SendError, e.to_string()),
+                            ThreadsafeFunctionCallMode::NonBlocking,
+                        );
+                    }
+                }
             }
         };
 
@@ -219,13 +230,13 @@ impl WebSocket {
                             }
                         }
                         Message::Close(frame) => {
-                            if let Some(frame) = frame {
+                            if let Some(_frame) = frame {
                                 if let Some(on_close) = &self.on_close {
-                                    on_close.call((), ThreadsafeFunctionCallMode::NonBlocking);
+                                    on_close.call(true, ThreadsafeFunctionCallMode::NonBlocking);
                                 }
                             } else {
                                 if let Some(on_close) = &self.on_close {
-                                    on_close.call((), ThreadsafeFunctionCallMode::NonBlocking);
+                                    on_close.call(false, ThreadsafeFunctionCallMode::NonBlocking);
                                 }
                             }
                         }
@@ -266,7 +277,10 @@ impl WebSocket {
                     },
                     Err(e) => {
                         if let Some(on_error) = &self.on_error {
-                            on_error.call((), ThreadsafeFunctionCallMode::NonBlocking);
+                            on_error.call(
+                                Error::new(WebSocketError::ReceiveError, e.to_string()),
+                                ThreadsafeFunctionCallMode::NonBlocking,
+                            );
                         }
                     }
                 }
@@ -341,7 +355,7 @@ impl WebSocket {
     }
 
     #[napi]
-    pub unsafe fn on_error(&mut self, callback: Function<(), ()>) -> Result<()> {
+    pub unsafe fn on_error(&mut self, callback: Function<Error<WebSocketError>, ()>) -> Result<()> {
         let callback = callback
             .build_threadsafe_function()
             .callee_handled::<false>()
@@ -373,8 +387,10 @@ impl WebSocket {
         Ok(())
     }
 
+    /// onClose event
+    /// if the connection is closed normally, the parameter is true, otherwise false
     #[napi]
-    pub unsafe fn on_close(&mut self, callback: Function<(), ()>) -> Result<()> {
+    pub unsafe fn on_close(&mut self, callback: Function<bool, ()>) -> Result<()> {
         let callback = callback
             .build_threadsafe_function()
             .callee_handled::<false>()

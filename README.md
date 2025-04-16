@@ -29,14 +29,19 @@ export declare class WebSocket {
   send(data: string | ArrayBuffer): Promise<void>
   close(): Promise<void>
   ping(pingMessage?: ArrayBuffer | undefined | null): Promise<void>
-  onError(callback: () => void): void
+  onError(callback: (arg: Error) => void): void
   onMessage(callback: (arg: string | ArrayBuffer) => void): void
   onOpen(callback: () => void): void
-  onClose(callback: () => void): void
+  /**
+    * onClose event
+    * if the connection is closed normally, the parameter is true, otherwise false
+    */
+  onClose(callback: (arg: boolean) => void): void
   onPing(callback: (arg: ArrayBuffer) => ArrayBuffer | null): void
   onPong(callback: (arg: ArrayBuffer) => void): void
   onHeaderReceived(callback: (arg: Record<string, string>) => void): void
 }
+
 ```
 
 ## Usage
